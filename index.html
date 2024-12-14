@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>5.7 Pomodoro Timer with YouTube Videos</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+        }
+
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            background-color: #fff;
+            padding: 10px;
+            border-bottom: 2px solid #ddd;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        label, input, button {
+            margin: 5px;
+            font-size: 16px;
+        }
+
+        #theaterContainer {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            height: 100vh;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .video {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 1s;
+        }
+
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        .inactive {
+            opacity: 0.3;
+            visibility: hidden;
+        }
+
+        .active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #timerDisplay {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 20px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        #presetsPopup {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border: 2px solid #ddd;
+            padding: 20px;
+            width: 300px;
+            z-index: 1001;
+        }
+
+        #presetsPopup button {
+            margin: 5px;
+            font-size: 16px;
+        }
+
+        #presetsButton {
+            font-size: 16px;
+        }
+
+        .closeButton {
+            background-color: #ff4d4d;
+            color: white;
+            padding: 5px 10px;
+            font-size: 16px;
+            border: none;
+            cursor: pointer;
+        }
+
+        @media (max-width: 768px) {
+            #controls label, #controls input, #controls button {
+                font-size: 14px;
+                margin: 3px;
+            }
+
+            #timerDisplay {
+                font-size: 16px;
+                padding: 3px 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <label>Study Time (mm:ss): <input type="text" id="studyTime" value="00:25"></label>
+        <label>Break Time (mm:ss): <input type="text" id="breakTime" value="00:05"></label>
+        <label>Study Video URL: <input type="text" id="studyVideo" placeholder="Enter YouTube video URL"></label>
+        <label>Break Video URL: <input type="text" id="breakVideo" placeholder="Enter YouTube video URL"></label>
+        <button id="startButton">START</button>
+        <button id="pauseButton" disabled>PAUSE</button>
+        <button id="skipButton" disabled>SKIP</button>
+        <button id="presetsButton">Presets</button>
+    </div>
+
+    <div id="theaterContainer">
+        <div id="studyPlayerContainer" class="video active">
+            <div id="timerDisplay">00:00</div>
+            <div id="studyPlayer"></div>
+        </div>
+        <div id="breakPlayerContainer" class="video inactive">
+            <div id="timerDisplay">00:00</div>
+            <div id="breakPlayer"></div>
+        </div>
+    </div>
+
+    <div id="presetsPopup">
+        <h3>Presets</h3>
+        <!-- Add your preset buttons here -->
+        <button id="presetMineWithMe">Mine With Me & Etho</button>
+        <button id="presetProductivityFocus">Running Through Hyrule</button>
+        <button id="presetRelaxingVibes">Relaxing Vibes</button>
+        <!-- Add more presets as needed -->
+        <button class="closeButton" id="closePopup">Close</button>
+    </div>
+
+    <script>
+        let studyTime, breakTime, isStudy = true, interval, remainingTime;
+        let studyPlayer, breakPlayer, isPaused = false, startTime;
+
+        const startButton = document.getElementById("startButton");
+        const pauseButton = document.getElementById("pauseButton");
+        const skipButton = document.getElementById("skipButton");
+        const timerDisplays = document.querySelectorAll("#timerDisplay");
+        const presetMineWithMe = document.getElementById("presetMineWithMe");
+        const presetProductivityFocus = document.getElementById("presetProductivityFocus");
+        const presetRelaxingVibes = document.getElementById("presetRelaxingVibes");
+        const studyContainer = document.getElementById("studyPlayerContainer");
+        const breakContainer = document.getElementById("breakPlayerContainer");
+        const presetsButton = document.getElementById("presetsButton");
+        const presetsPopup = document.getElementById("presetsPopup");
+        const closePopup = document.getElementById("closePopup");
+
+        function parseTimeInput(time) {
+            const parts = time.split(":").map(Number);
+            return parts.length === 2 ? parts[0] * 60 + parts[1] : parseInt(time, 10);
+        }
+
+        const getYouTubeVideoIdOrPlaylistId = (url) => {
+            // Match video ID or playlist ID
+            const videoMatch = url.match(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([\w-]{11})|youtu\.be\/([\w-]{11})/);
+            const playlistMatch = url.match(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/(?:playlist\?list=|watch\?.*?list=)([\w-]+)/);
+            
+            if (videoMatch) {
+                return { type: 'video', id: videoMatch[1] || videoMatch[2] };
+            } else if (playlistMatch) {
+                return { type: 'playlist', id: playlistMatch[1] };
+            } else {
+                return null;
+            }
+        };
+
+        function startTimer(duration, callback) {
+            let timeLeft = duration;
+            remainingTime = duration;
+            clearInterval(interval);
+            interval = setInterval(() => {
+                if (!isPaused) {
+                    const minutes = Math.floor(timeLeft / 60);
+                    const seconds = timeLeft % 60;
+                    const formattedTime = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+
+                    if (isStudy) {
+                        timerDisplays[0].textContent = formattedTime;
+                    } else {
+                        timerDisplays[1].textContent = formattedTime;
+                    }
+
+                    if (--timeLeft < 0) {
+                        clearInterval(interval);
+                        callback();
+                    }
+                    remainingTime = timeLeft;
+                }
+            }, 1000);
+        }
+
+        function switchMode() {
+            if (isStudy) {
+                studyPlayer.pauseVideo();
+                breakPlayer.playVideo();
+                studyContainer.classList.replace("active", "inactive");
+                breakContainer.classList.replace("inactive", "active");
+                startTimer(breakTime, switchMode);
+            } else {
+                breakPlayer.pauseVideo();
+                studyPlayer.playVideo();
+                breakContainer.classList.replace("active", "inactive");
+                studyContainer.classList.replace("inactive", "active");
+                startTimer(studyTime, switchMode);
+            }
+            isStudy = !isStudy;
+        }
+
+        startButton.addEventListener("click", () => {
+            studyTime = parseTimeInput(document.getElementById("studyTime").value);
+            breakTime = parseTimeInput(document.getElementById("breakTime").value);
+
+            const studyUrl = document.getElementById("studyVideo").value.trim();
+            const breakUrl = document.getElementById("breakVideo").value.trim();
+
+            const studyData = getYouTubeVideoIdOrPlaylistId(studyUrl);
+            const breakData = getYouTubeVideoIdOrPlaylistId(breakUrl);
+
+            if (!studyData || !breakData) {
+                alert("Please enter valid YouTube video or playlist URLs.");
+                return;
+            }
+
+            if (studyData.type === "video") {
+                studyPlayer.loadVideoById(studyData.id);
+            } else {
+                studyPlayer.loadPlaylist({ list: studyData.id });
+            }
+
+            if (breakData.type === "video") {
+                breakPlayer.loadVideoById(breakData.id);
+            } else {
+                breakPlayer.loadPlaylist({ list: breakData.id });
+            }
+
+            studyPlayer.playVideo();
+            setTimeout(() => breakPlayer.pauseVideo(), 500);
+
+            isPaused = false;
+            pauseButton.disabled = false;
+            skipButton.disabled = false;
+            startTimer(studyTime, switchMode);
+        });
+
+        pauseButton.addEventListener("click", () => {
+            if (isPaused) {
+                if (isStudy) {
+                    studyPlayer.playVideo();
+                } else {
+                    breakPlayer.playVideo();
+                }
+                startTimer(remainingTime, switchMode);
+                pauseButton.textContent = "PAUSE";
+            } else {
+                if (isStudy) {
+                    studyPlayer.pauseVideo();
+                } else {
+                    breakPlayer.pauseVideo();
+                }
+                clearInterval(interval);
+                pauseButton.textContent = "RESUME";
+            }
+            isPaused = !isPaused;
+        });
+
+        skipButton.addEventListener("click", switchMode);
+
+        // Presets functionality
+        presetsButton.addEventListener("click", () => {
+            presetsPopup.style.display = "block";
+        });
+
+        closePopup.addEventListener("click", () => {
+            presetsPopup.style.display = "none";
+        });
+
+        // Add preset event listeners for each preset
+        presetMineWithMe.addEventListener("click", () => {
+            document.getElementById("studyVideo").value = "https://youtu.be/SyNrG8f9sqY?si=Fc267aYVy0RYVTCh";
+            document.getElementById("breakVideo").value = "https://youtu.be/Tn9eQAAD5_Y?si=l8kfl3UrkIVv0Gyw";
+            presetsPopup.style.display = "none";
+        });
+
+        presetProductivityFocus.addEventListener("click", () => {
+            document.getElementById("studyVideo").value = "https://youtu.be/yZlMuOuepQk?si=tYyjs-nwiJTxPqem";  // Example URL
+            document.getElementById("breakVideo").value = "https://www.youtube.com/watch?v=DgIdymgu0yo&ab_channel=Arlo";  // Example URL
+            presetsPopup.style.display = "none";
+        });
+
+        presetRelaxingVibes.addEventListener("click", () => {
+            document.getElementById("studyVideo").value = "https://youtube.com/playlist?list=PLZHdY_46KnYuY7kUUXm__NrLMEll8IGGX&si=LAantrP5OlNeqaJb";  // Example URL
+            document.getElementById("breakVideo").value = "https://youtube.com/playlist?list=PL8mG-RkN2uTw7PhlnAr4pZZz2QubIbujH&si=Cf4h7Dy7vFtb-JRA";  // Example URL
+            presetsPopup.style.display = "none";
+        });
+
+        function onYouTubeIframeAPIReady() {
+            studyPlayer = new YT.Player("studyPlayer", {
+                events: {
+                    onReady: function () {
+                        console.log("Study Video Ready");
+                    }
+                }
+            });
+
+            breakPlayer = new YT.Player("breakPlayer", {
+                events: {
+                    onReady: function () {
+                        console.log("Break Video Ready");
+                    }
+                }
+            });
+        }
+
+        window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
+    </script>
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
